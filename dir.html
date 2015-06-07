@@ -1,0 +1,72 @@
+<!DOCTYPE html>
+<html>
+  <head>
+    <title>MarkupMarkdown Index Index of {{.Name}}</title>
+    <meta charset="utf-8">
+    <meta http-equiv="X-UA-Compatible" content="chrome=1">
+    <style type="text/css">
+      a, a:active {text-decoration: none; color: blue;}
+      a:visited {color: #48468F;}
+      a:hover, a:focus {text-decoration: underline; color: red;}
+      body {background-color: #F5F5F5;}
+      h2 {margin-bottom: 12px;}
+      table {margin-left: 12px;}
+      th, td { font: 90% monospace; text-align: left;}
+      th { font-weight: bold; padding-right: 14px; padding-bottom: 3px;}
+      td {padding-right: 14px;}
+      td.s, th.s {text-align: right;}
+      div.list { background-color: white; border-top: 1px solid #646464; border-bottom: 1px solid #646464; padding-top: 10px; padding-bottom: 14px;}
+      div.foot { font: 90% monospace; color: #787878; padding-top: 4px;}
+    </style>
+  </head>
+  <body>
+    <h2>MarkupMarkdown Index of {{.Name}}</h2>
+    <div class="list">
+      <table summary="Directory Listing" cellpadding="0" cellspacing="0">
+        <thead><tr><th class="n">Name</th><th class="t">Type</th><th class="dl">Options</th><th>Presentation</th><th>One Frame</th><th>Collapsible</th><th>Top</th><th>Plain md->Html</th></tr></thead>
+        <tbody>
+          {{ if .ListSubDirectories }}
+            <tr><td class="n"><a href="../">Parent Directory</a>/</td><td class="t">Directory</td><td class="dl"></td></tr>
+            {{range .Children_dir}}
+               <tr><td class="n"><a href="{{.}}/">{{.}}/</a></td><td class="t">Directory</td><td class="dl"></td></tr>
+            {{end}}
+          {{end}}
+          {{range .Children_files}}
+              <br>{{.}}
+              <td><a type="html" href="{{.}}" target="_self">{{.}}</a></td><td class="t">&nbsp;</td>
+            {{ if . | isJson }}
+            <tr>
+              <td><a type="text" href="{{.}}" target="_self">{{.}}</a></td><td class="t">&nbsp;</td>
+              <td>&nbsp;</td>
+              <td><a type="text" href="{{.}}" target="_self">[{{.}}]</a></td>
+            </tr>
+          {{ end }}
+          {{ if . | isMarkdown }}
+          <tr>
+            <td class="n"><a type="text" href="{{.}}" target="_self">{{.}}</a></td><td class="t">&nbsp;</td>
+            <td>&nbsp;</td>
+            <td class="n2"><a href="/slides/{{.}}?presentme=true"  target="_self">[{{.}}]</a></td>
+            <td class="n2"><a href="/slides/{{.}}?presentme=false" target="_self">[{{.}}]</a></td>
+            <td class="n2"><a href="/menu1/{{.}}"                  target="_self">[{{.}}]</a></td>
+            <td class="n2"><a href="/menu2/{{.}}"                  target="_self">[{{.}}]</a></td>
+            <td class="n2"><a href="/plain/{{.}}"                  target="_self">[{{.}}]</a></td>
+          </tr>
+          {{end}}
+          {{ if . | isHTML }}
+          <tr>
+            <td class="n"><a href="{{.}}" target="_self">{{.}}</a></td><td class="t">&nbsp;</td>
+          </tr>
+          {{end}}
+          {{end}}
+        </tbody>
+      </table>
+    </div>
+    <div class="foot">{{.ServerUA}}</div>
+  </body>
+</html>
+
+<!-- 
+     local variables:
+     mode: html
+     end:
+  -->

@@ -1,0 +1,291 @@
+#cloud-config
+
+# Notice: This configuration may not work at all without testing.
+# Do not use this without testing in a safe environment
+
+# This configuration uses a bridge interface bridge0 to enable
+# configuring docker ip address assignment visibility directly on the
+# network, a bonded interface for ethernet device failover maps to the
+# underlying ether net devices and CIDR --fixed-cidr to partition a
+# subnet at defined number of docker subnet bits.
+
+# There are also some configuration options to enable managing via an
+# early version of kubernetes and to configure options. These options
+# are changing, so YMMV.
+
+write_files:
+{{ if .ProxyUrl }}
+  - path: /etc/systemd/system/update-engine.service.d/proxy.conf
+    permissions: 0600
+    owner: root
+    content: |
+        [Service]
+        Environment="ALL_PROXY={{ .ProxyUrl }}"
+        Environment="http_proxy={{ .ProxyUrl }}"
+        Environment="https_proxy={{ .ProxyUrl }}"
+{{ end }}
+
+  - path: /etc/systemd/system/motdgen.d/motdgen
+    permissions: 0755
+    owner: root
+    content: |
+        #!/bin/bash -e
+        source /usr/lib/os-release
+        rm -f /etc/motd
+        echo -e "OS ${NAME} (${VERSION})" > /run/motd
+
+  - path: modules-load.d/loop.conf
+    permissions: 0644
+    owner: root
+    content: |
+       loop
+
+  - path: /etc/modprobe.d/loop.conf
+    permissions: 0644
+    owner: root
+    content: |
+       options loop max_loop=255
+
+  - path: /etc/resolv.conf
+    permissions: 0644
+    owner: root
+    content: |
+      search {{ .DnsSearch }}
+      domain {{ .Domain }}
+      nameserver {{ .Dns1 }}
+      nameserver {{ .Dns2 }}
+
+  - path: /etc/systemd/journald.conf
+    permissions: 0644
+    owner: root
+    content: |
+      [Journal]
+      SystemMaxUse=25M
+      SystemMaxFileSize=1G
+      RuntimeMaxUse=25M
+
+  - path: /var/lib/ecmi/bin/iptables-managment.sh
+    permissions: 0644
+    owner: root
+    content: |
+      #!/bin/bash
+      iptables -I INPUT -p tcp -d {{ .HostIp }} --dport {{ .DockerMgmtPort }} -j DROP 
+      iptables -I INPUT -i eth0 -p tcp -s {{ .ClusterMgmtIp }} -d {{ .HostIp }} \
+        --dport {{ .DockerMgmtPort }} -j ACCEPT 
+
+coreos:
+
+  update:
+    reboot-strategy: off
+    group: stable
+
+  fleet:
+    etcd_servers: {{ .FleetMgmtUrl }}
+    metadata: "{{ .Metadata | Commaize }}"
+
+  etcd:
+    name: etcd
+    bind-addr: 0.0.0.0
+    peer-addr: {{ .EtcdIp }}:7001
+    addr: {{ .EtcdIp }}:4001
+    cluster-active-size: 1
+    snapshot: true
+    data-dir: /var/lib/etcd
+
+  units:
+
+    - name: systemd-journald.service
+      command: restart
+
+    - name: etcd.service
+      command: start
+
+    - name: fleet.service
+      command: start
+      drop-ins:
+        - name: 50-fleet-install.conf
+          content: |
+           [Install]
+           WantedBy=multi-user.target
+
+    - name: 10.static.netdev
+      command: start
+      content: |
+        [NetDev]
+        Name=bridge0
+        Kind=bridge
+
+    - name: 20.static.network
+      command: start
+      content: |
+        [Match]
+        Name=bridge0
+
+        [Network]
+        Address={{ .HostIp }}/{{ .HostSubnetBits }}
+        DNS={{ .Dns1 }}
+        DNS={{ .Dns2 }}
+        Gateway={{ .Gateway }}
+
+    - name: 30.static.netdev
+      command: start
+      content: |
+        [NetDev]
+        Name=bond0
+        Kind=bond
+
+        [Bond]
+        Mode=active-backup
+
+    - name: 40.static.network
+      command: start
+      content: |
+        [Match]
+        Name=bond0
+
+        [Network]
+        Bridge=bridge0
+
+    - name: 50.static.network
+      command: start
+      content: |
+        [Match]
+        Name=eno1
+
+        [Network]
+        Bond=bond0
+
+    - name: 60.static.network
+      command: start
+      content: |
+        [Match]
+        Name=eno2
+
+        [Network]
+        Bond=bond0
+
+    - name: docker.socket
+      command: start
+      enable: true
+
+    - name: docker.service
+      command: start
+      enable: true
+      content: |
+        [Unit]
+        After=docker.socket
+        Description=Docker Application Container Engine
+        Documentation=http://docs.docker.io
+        [Service]
+        Restart=always
+{{ if .ProxyUrl }}
+        Environment="ALL_PROXY={{ .ProxyUrl }}"
+        Environment="http_proxy={{ .ProxyUrl }}"
+        Environment="https_proxy={{ .ProxyUrl }}"
+{{ end }}
+        Environment="TMPDIR=/var/tmp"
+        Environment="ETCDCTL_PEERS={{ .EtcdPeers }}"
+        Environment="FLEETCTL_ENDPOINT={{ .FleetMgmtUrl }}"
+        Environment="DOCKER_OPT_BIP=-b=bridge0"
+        Environment="DOCKER_OPT_MTU="
+        Environment="DOCKER_OPT_CIDR=--fixed-cidr={{ .DockerCIDR }}"
+        Environment="DOCKER_OPTS=--insecure-registry=10.0.0.0/8  --host=unix:///var/run/docker.sock"
+        MountFlags=slave
+        LimitNOFILE=1048576
+        LimitNPROC=1048576
+        ExecStartPre=-/bin/chown docker.docker /var/run/docker.sock
+        ExecStart=/bin/bash -c "/usr/lib/coreos/dockerd \
+                 --daemon \
+                 ${DOCKER_OPTS} \
+                 ${DOCKER_OPT_BIP} \
+                 ${DOCKER_OPT_CIDR} \
+                 ${DOCKER_OPT_MTU} \
+                 ${DOCKER_OPT_IPMASQ} \
+                 --host=unix:///var/run/docker.sock \
+                 "
+        [Install]
+        WantedBy=multi-user.target
+
+    - name: setup-network-environment.service
+      command: start
+      enable: true
+      content: |
+        [Unit]
+        Description=Setup Network Environment
+        Documentation=https://github.com/kelseyhightower/setup-network-environment
+        After=etcd.service
+        [Service]
+        ExecStartPre=/usr/bin/chmod +x /var/lib/ecmi/bin/setup-network-environment
+        ExecStart=/var/lib/ecmi/bin/setup-network-environment
+        RemainAfterExit=yes
+        Type=oneshot
+
+        [Install]
+        WantedBy=multi-user.target
+
+    - name: update-engine.service
+      command: restart
+
+    - name: systemd-modules-load.service
+      command: restart
+
+    - name: motdgen.service
+      command: restart
+      enable: true
+      content: |
+        [Unit]
+        Description=Generate motd
+        Before=systemd-user-sessions.service
+        After=locksmithd.service
+
+        [Service]
+        Type=oneshot
+        ExecStart=/etc/systemd/system/motdgen.d/motdgen
+        RemainAfterExit=yes
+        Type=oneshot
+
+        [Install]
+        WantedBy=multi-user.target
+
+    - name: kube-proxy.service
+      command: start
+      content: |
+        [Unit]
+        Description=Kubernetes Proxy
+        Documentation=https://github.com/GoogleCloudPlatform/kubernetes
+        Requires=setup-network-environment.service
+        After=setup-network-environment.service
+
+        [Service]
+        ExecStartPre=/usr/bin/chmod +x /var/lib/ecmi/bin/k8s/kube-proxy
+        EnvironmentFile=/etc/network-environment
+        ExecStart=/var/lib/ecmi/bin/k8s/kube-proxy \
+        --master={{ .ClusterMgmtIp }}:{{ .ClusterMgmtPort }} {{ .KubeletOptions }} \
+        --logtostderr=true
+        Restart=always
+        RestartSec=10
+
+    - name: kube-kubelet.service
+      command: start
+      content: |
+        [Unit]
+        Description=Kubernetes Kubelet
+        Documentation=https://github.com/GoogleCloudPlatform/kubernetes
+        Requires=setup-network-environment.service
+        After=setup-network-environment.service
+
+        [Service]
+        ExecStartPre=/usr/bin/chmod +x /var/lib/ecmi/bin/k8s/kubelet
+        EnvironmentFile=/etc/network-environment
+        ExecStart=/var/lib/ecmi/bin/k8s/kubelet \
+        --address=0.0.0.0 \
+        --port=10250 \
+        --hostname_override={ip} \
+        --logtostderr=true --v=4 {{ .KubeletOptions }} {{ .PrivilegedOption }}
+
+        Restart=always
+        RestartSec=10
+
+# local variables:
+# comment-start: "# "
+# end:

@@ -1,0 +1,298 @@
+<?xml version="1.0" encoding="UTF-8" ?>
+<!DOCTYPE html PUBLIC "-//W3C//DTD XHTML 1.0 Strict//EN"
+	"http://www.w3.org/TR/xhtml1/DTD/xhtml1-strict.dtd">
+
+<html xmlns="http://www.w3.org/1999/xhtml">
+
+<head>
+<title>cfggen/404.html</title>
+
+</head>
+
+<body>
+
+<h3 id="cfggen">CfgGen</h3>
+<h4 id="generate-configuration">generate configuration</h4>
+<h5 id="notice-this-configuration-may-not-work-at-all-without-testing.">Notice: This configuration may not work at all without testing.</h5>
+<h5 id="do-not-use-this-without-testing-in-a-safe-environment">Do not use this without testing in a safe environment</h5>
+<pre><code>Usage: 
+
+URL http://host:port/{ipaddress} will generate a configuration
+text with a configuration and inject into a backend registry
+defaulting to etcd.
+
+Loads template from a text &#39;yaml&#39; file with golang formatted
+templates.
+
+The initial use case is a coreos cloud init formatted file.
+
+http get:
+http://host:port
+
+    returns this document
+
+http get:
+http://host:port/10.0.0.3
+
+    returns the --config-template after replacing golang template
+    format options with a configuration then injects into a
+    backend registry defaulting to etcd with the path
+    /config/by_ip/{ipaddress} equivalent to
+
+    etcdctl set /config/by_ip/{ipaddress} &quot;{configuration json}&quot;
+
+
+http get:
+http://host:port/{ipaddress}
+
+    loads --config-file json injecting to Cfg struct executes the
+    template replacing golang formatted template entries from the
+    --config-template file, writes the modified json config to
+    etcd in /config/by_ip/{ipaddress} and responds with the result
+    of the template cloud config or other template formatted file
+    after replacement.
+
+http get:
+http://host:port/config/
+
+    dumps the raw json from the --config-file
+
+http get:
+http://host:port/config/{ipaddress}
+
+    dumps the --config-file&#39;s json after formatting and modifying
+    it with the ipaddress and subnetbits
+
+http get:
+http://host:port/etcd/{ipaddress} 
+
+    dumps the etcd record after modification for {ipaddress} if
+    found as if using etcdctl to pull down data, formatting with
+    indentation.
+
+    etcdctl get /config/by_ip/{ipaddress} | jq .
+
+
+http get:
+http://host:port/etcd/
+
+    dumps all etcd records after modification for {ipaddress} if
+    found as if using etcdctl to pull down data, formatting with
+    indentation.
+
+    etcdctl get --recursive /config/by_ip/{ipaddress} | jq .
+
+
+http get:
+http://host:port/plain/{filename} 
+
+    read a raw file
+
+
+Example commands to query configuration state
+curl -s localhost:8080/config/1.1.1.1
+
+etcdctl ls --recursive /config/by_ip/
+
+for p in $(etcdctl ls --recursive /config/by_ip); do etcdctl get ${p}; done</code></pre>
+<h3 id="cfggen-1">CfgGen</h3>
+<h4 id="example-initial-json-definition">example initial json definition</h4>
+<pre><code>Replacement options are managed via config.json in config format
+
+type v0Cfg struct {
+    CfgVersion            string             `json:CfgVersion:`
+    HostIp                string             `json:HostIp:`
+    HostName              string             `json:HostName:`
+    HostSubnetBits        string             `json:HostSubnetBits:`
+    HostCIDR              string             `json:HostCIDR:`
+
+    Gateway               string             `json:Gateway:`
+
+    DnsSearch             string             `json:DnsSearch:`
+    Domain                string             `json:Domain:`
+    Dns1                  string             `json:Dns1:`
+    Dns2                  string             `json:Dns2:`
+
+    // restricted access
+    ClusterMgmtIp         string             `json:ClusterMgmtIp:`
+    ClusterMgmtPort       string             `json:ClusterMgmtPort:`
+    ClusterMgmtUrl        string             `json:ClusterMgmtUrl:`
+
+    DockerIp              string             `json:DockerIp:`
+    DockerSubnetBits      string             `json:DockerSubnetBits:`
+    DockerCIDR            string             `json:DockerCIDR:`
+    DockerMgmtPort        string             `json:DockerMgmtPort:`
+    DockerMgmtUrl         string             `json:DockerMgmtUrl:`
+
+    EtcdIp                string             `json:EtcdIp:`
+    Etcdv1ClientPort      string             `json:Etcdv1ClientPort:`
+    Etcdv1MgmtPort        string             `json:Etcdv1MgmtPort:`
+    Etcdv2ClientPort      string             `json:Etcdv2ClientPort:`
+    Etcdv2MgmtPort        string             `json:Etcdv2MgmtPort:`
+    EtcdPeers             string             `json:EtcdPeers:`
+    EtcdDiscoveryToken    string             `json:EtcdDiscoveryToken:`
+    EtcdDiscoveryUrl      string             `json:EtcdDiscoveryUrl:`
+
+    FleetMgmtUrl          string             `json:FleetMgmtUrl:`
+
+    KubeletOptions        string             `json:KubeletOptions:`
+    PrivilegedOption      string             `json:PrivilegedOption:`
+
+    ProxyUrl              string             `json:ProxyUrl:`       
+
+    Metadata              MetadataMap        `json:Metadata:`
+}</code></pre>
+<h3 id="cfggen-2">CfgGen</h3>
+<h4 id="template-example">template example</h4>
+<pre><code>Example template snippet 
+
+#cloud-config
+
+# Notice: This configuration may not work at all without testing.
+# Do not use this without testing in a safe environment
+
+# This configuration uses a bridge interface bridge0 to enable
+# configuring docker ip address assignment visibility directly on the
+# network, a bonded interface for ethernet device failover maps to the
+# underlying ether net devices and CIDR --fixed-cidr to partition a
+# subnet at defined number of docker subnet bits.
+
+# There are also some configuration options to enable managing via an
+# early version of kubernetes and to configure options. These options
+# are changing, so YMMV.
+
+write_files:
+  - path: /etc/resolv.conf
+    permissions: 0644
+    owner: root
+    content: |
+      search {{ .DnsSearch }}
+      domain {{ .Domain }}
+      nameserver {{ .Dns1 }}
+      nameserver {{ .Dns2 }}
+
+  - path: /var/lib/ecmi/bin/iptables-managment.sh
+    permissions: 0644
+    owner: root
+    content: |
+      #!/bin/bash
+      iptables -I INPUT -p tcp -d {{ .HostIp }} --dport {{ .DockerMgmtPort }} -j DROP 
+      iptables -I INPUT -i eth0 -p tcp -s {{ .ClusterMgmtIp }} -d {{ .HostIp }} \
+        --dport {{ .DockerMgmtPort }} -j ACCEPT 
+
+coreos:
+
+  update:
+    reboot-strategy: off
+    group: stable
+
+  fleet:
+    etcd_servers: {{ .FleetMgmtUrl }}
+    metadata: &quot;{{ .Metadata | Commaize }}&quot;
+
+  etcd:
+    name: etcd
+    bind-addr: 0.0.0.0
+    peer-addr: {{ .EtcdIp }}:7001
+    addr: {{ .EtcdIp }}:4001
+    cluster-active-size: 1
+    snapshot: true
+    data-dir: /var/lib/etcd
+
+  units:
+
+    - name: systemd-journald.service
+      command: restart
+
+    - name: etcd.service
+      command: start
+
+    - name: fleet.service
+      command: start
+      drop-ins:
+        - name: 50-fleet-install.conf
+          content: |
+           [Install]
+           WantedBy=multi-user.target
+
+    - name: 10.static.netdev
+      command: start
+      content: |
+        [NetDev]
+        Name=bridge0
+        Kind=bridge
+
+    - name: 20.static.network
+      command: start
+      content: |
+        [Match]
+        Name=bridge0
+
+        [Network]
+        Address={{ .HostIp }}/{{ .HostSubnetBits }}
+        DNS={{ .Dns1 }}
+        DNS={{ .Dns2 }}
+        Gateway={{ .Gateway }}
+
+
+
+### Sample Json written to Etcd
+
+
+for p in $(etcdctl ls --recursive /config/by_ip); do etcdctl get ${p}; done
+
+The json provided describes the current desired configuration
+state of the host with etcd as the system of record.
+
+{
+  &quot;CfgVersion&quot;: &quot;v0&quot;,
+  &quot;HostIp&quot;: &quot;10.1.2.65&quot;,
+  &quot;HostName&quot;: &quot;coreos-001&quot;,
+  &quot;HostSubnetBits&quot;: &quot;8&quot;,
+  &quot;HostCIDR&quot;: &quot;10.1.2.65/23&quot;,
+  &quot;Gateway&quot;: &quot;10.1.3.1&quot;,
+  &quot;DnsSearch&quot;: &quot;example.com canary.example.com&quot;,
+  &quot;Domain&quot;: &quot;example.com&quot;,
+  &quot;Dns1&quot;: &quot;10.1.4.3&quot;,
+  &quot;Dns2&quot;: &quot;10.1.4.4&quot;,
+  &quot;ClusterMgmtIp&quot;: &quot;10.1.3.19&quot;,
+  &quot;ClusterMgmtPort&quot;: &quot;8080&quot;,
+  &quot;ClusterMgmtUrl&quot;: &quot;http://10.1.3.19:8080&quot;,
+  &quot;DockerIp&quot;: &quot;10.1.2.193&quot;,
+  &quot;DockerSubnetBits&quot;: &quot;28&quot;,
+  &quot;DockerCIDR&quot;: &quot;10.1.2.193/28&quot;,
+  &quot;DockerMgmtPort&quot;: &quot;2375&quot;,
+  &quot;DockerMgmtUrl&quot;: &quot;tcp://10.1.2.65:2375&quot;,
+  &quot;EtcdIp&quot;: &quot;10.1.3.19&quot;,
+  &quot;Etcdv1ClientPort&quot;: &quot;4001&quot;,
+  &quot;Etcdv1MgmtPort&quot;: &quot;7001&quot;,
+  &quot;Etcdv2ClientPort&quot;: &quot;2379&quot;,
+  &quot;Etcdv2MgmtPort&quot;: &quot;2380&quot;,
+  &quot;EtcdPeers&quot;: &quot;http://10.1.3.19:4001&quot;,
+  &quot;EtcdDiscoveryToken&quot;: &quot;4421819c7e708956af7ab67ddcd7ace3&quot;,
+  &quot;EtcdDiscoveryUrl&quot;: &quot;http://10.1.3.19/4421819c7e708956af7ab67ddcd7ace3&quot;,
+  &quot;FleetMgmtUrl&quot;: &quot;http://10.1.3.19:4001&quot;,
+  &quot;KubeletOptions&quot;: &quot;--etcd_servers=http://10.1.3.19:8080&quot;,
+  &quot;PrivilegedOption&quot;: &quot;&quot;,
+  &quot;ProxyUrl&quot;: &quot;http://userid:proxypass@example.com:80&quot;,
+  &quot;Metadata&quot;: {
+    &quot;arch&quot;: &quot;x86_64&quot;,
+    &quot;country&quot;: &quot;US&quot;,
+    &quot;datacenter&quot;: &quot;sftlyr:dal01&quot;,
+    &quot;engines&quot;: &quot;docker&quot;,
+    &quot;hostname&quot;: &quot;coreos-001&quot;,
+    &quot;mgmt&quot;: &quot;wkr&quot;,
+    &quot;mntr&quot;: &quot;false&quot;,
+    &quot;platform&quot;: &quot;HP G8 12 Core&quot;,
+    &quot;public_ip&quot;: &quot;10.1.2.65&quot;,
+    &quot;region&quot;: &quot;central&quot;,
+    &quot;role&quot;: &quot;node&quot;,
+    &quot;zone&quot;: &quot;private&quot;
+  }
+}</code></pre>
+<h3 id="cfggen-3">CfgGen</h3>
+<h4 id="license">LICENSE</h4>
+<p><a href="plain/LICENSE">License</a></p>
+
+</body>
+</html>
