@@ -1,4 +1,3 @@
-# git clone ssh://github.com/d2g/dhcp4client.git
 # statically link go 
 SHELL=/bin/bash
 GOPATH=${HOME}/container/go:${PWD}
